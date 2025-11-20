@@ -293,7 +293,10 @@ const runMigrations = async () => {
             { id: 24, sql: "ALTER TABLE licenses ADD COLUMN observacoes TEXT;" },
             { id: 25, sql: "ALTER TABLE licenses ADD COLUMN approval_status VARCHAR(50) DEFAULT 'approved';" },
             { id: 26, sql: "ALTER TABLE licenses ADD COLUMN rejection_reason TEXT;" },
-            { id: 27, sql: "ALTER TABLE licenses ADD COLUMN empresa VARCHAR(255) NULL;" }
+            { id: 27, sql: "ALTER TABLE licenses ADD COLUMN empresa VARCHAR(255) NULL;" },
+            { // Migration 28: Remove UNIQUE constraint from serial to allow multiple records with same serial (diff users)
+                id: 28, sql: "ALTER TABLE equipment DROP INDEX serial;" 
+            }
         ];
         
         const migrationsToRun = migrations.filter(m => !executedMigrationIds.has(m.id));
@@ -670,12 +673,13 @@ app.post('/api/equipment', async (req, res) => {
         if (userRows.length === 0) return res.status(404).json({ message: "User not found" });
         const user = userRows[0];
 
-        if (equipment.serial) {
-            const [serialCheck] = await db.promise().query('SELECT id FROM equipment WHERE serial = ?', [equipment.serial]);
-            if (serialCheck.length > 0) {
-                return res.status(409).json({ message: "Erro: O número de série já está cadastrado no sistema." });
-            }
-        }
+        // NOTE: Duplicate serial check removed here as requested by user to allow multiple records with same serial (different users)
+        // if (equipment.serial) {
+        //     const [serialCheck] = await db.promise().query('SELECT id FROM equipment WHERE serial = ?', [equipment.serial]);
+        //     if (serialCheck.length > 0) {
+        //         return res.status(409).json({ message: "Erro: O número de série já está cadastrado no sistema." });
+        //     }
+        // }
 
         const newEquipmentData = cleanDataForDB(equipment, EQUIPMENT_FIELDS);
         

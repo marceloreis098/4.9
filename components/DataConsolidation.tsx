@@ -125,42 +125,93 @@ const DataConsolidation: React.FC<{ currentUser: User }> = ({ currentUser }) => 
                 'TERMODERESPONSABILIDADE': 'termoResponsabilidade', 'FOTO': 'foto', 'QRCODE': 'qrCode',
                 'MARCA': 'brand', 'MODELO': 'model', 'EMAILCOLABORADOR': 'emailColaborador',
                 'IDENTIFICADOR': 'identificador', 'NOMESO': 'nomeSO', 'MEMORIAFISICATOTAL': 'memoriaFisicaTotal', 
-                'GRUPODEPOLITICAS': 'grupoPoliticas', 'PAIS': 'pais', 'CIDADE': 'cidade', 'ESTADOPROVINCIA': 'estadoProvincia'
+                'GRUPODEPOLITICAS': 'grupoPoliticas', 'PAIS': 'pais', 'CIDADE': 'cidade', 'ESTADOPROVINCIA': 'estadoProvincia',
+                'OBSERVACOES': 'observacoes'
             };
 
+            // Atualizado conforme imagem fornecida pelo usuário (Coluna B)
             const absoluteMappings: { [key: string]: keyof Equipment } = {
-                'NOMEDODISPOSITIVO': 'equipamento', 'NUMERODESERIE': 'serial',
-                'NOMEDOUSUÁRIOATUAL': 'usuarioAtual', 'MARCA': 'brand', 'MODELO': 'model',
-                'EMAILDOCOLABORADOR': 'emailColaborador',
-                'IDENTIFICADOR': 'identificador', 'NOMESO': 'nomeSO', 'MEMORIAFISICATOTAL': 'memoriaFisicaTotal', 
-                'GRUPODEPOLITICAS': 'grupoPoliticas', 'PAIS': 'pais', 'CIDADE': 'cidade', 'ESTADOPROVÍNCIA': 'estadoProvincia'
+                'IDENTIFICADOR': 'identificador',
+                'NOMEDODISPOSITIVO': 'equipamento',
+                'NÚMERODESÉRIE': 'serial',
+                'NUMERODESERIE': 'serial', // Fallback sem acento
+                'MARCA': 'brand',
+                'MODELO': 'model',
+                'NOMEDOUSUÁRIOATUAL': 'usuarioAtual',
+                'NOMEDOUSUARIOATUAL': 'usuarioAtual', // Fallback sem acento
+                'NOMEDOSO': 'nomeSO',
+                'MEMÓRIAFÍSICATOTAL': 'memoriaFisicaTotal', 
+                'MEMORIAFISICATOTAL': 'memoriaFisicaTotal', // Fallback
+                'GRUPODEPOLÍTICAS': 'grupoPoliticas',
+                'GRUPODEPOLITICAS': 'grupoPoliticas', // Fallback
+                'PAÍS': 'pais',
+                'PAIS': 'pais', // Fallback
+                'ESTADO/PROVÍNCIA': 'estadoProvincia',
+                'ESTADOPROVINCIA': 'estadoProvincia', // Fallback
+                'CIDADE': 'cidade'
             };
 
             const baseData = parseCsv(baseText, baseMappings);
             const absoluteData = parseCsv(absoluteText, absoluteMappings);
             
-            const consolidatedMap = new Map<string, PartialEquipment>();
-
-            // Process base data first. This handles duplicates within the base file (last one wins).
-            baseData.forEach(baseItem => {
-                const key = baseItem.serial!.toUpperCase().replace(/ /g, '');
-                consolidatedMap.set(key, baseItem);
+            const absoluteMap = new Map<string, PartialEquipment>();
+            absoluteData.forEach(item => {
+                if(item.serial) {
+                    absoluteMap.set(item.serial.toUpperCase().replace(/\s/g, ''), item);
+                }
             });
 
-            // Process absolute data, merging with or adding to the base data.
-            // This handles duplicates within the absolute file and ensures its data has priority.
-            absoluteData.forEach(absoluteItem => {
-                const key = absoluteItem.serial!.toUpperCase().replace(/ /g, '');
-                const existingItem = consolidatedMap.get(key) || {};
-                consolidatedMap.set(key, { ...existingItem, ...absoluteItem });
+            const finalData: PartialEquipment[] = [];
+            const processedSerialsFromAbsolute = new Set<string>();
+
+            baseData.forEach(baseItem => {
+                const serialKey = baseItem.serial!.toUpperCase().replace(/\s/g, '');
+                
+                if (absoluteMap.has(serialKey)) {
+                    const absoluteItem = absoluteMap.get(serialKey)!;
+                    processedSerialsFromAbsolute.add(serialKey);
+
+                    const baseUser = baseItem.usuarioAtual ? baseItem.usuarioAtual.trim() : '';
+                    const absUser = absoluteItem.usuarioAtual ? absoluteItem.usuarioAtual.trim() : '';
+
+                    if (baseUser === '' && absUser !== '') {
+                        // Caso: Planilha Base em branco, Absolute tem usuário.
+                        // Ação: Preencher a base (Atualizar registro existente) e NÃO criar novo.
+                        finalData.push({
+                            ...baseItem,
+                            ...absoluteItem, // Absolute preenche os dados faltantes
+                            status: 'Em Uso'
+                        });
+                    } else if (baseUser !== '' && absUser !== '' && baseUser.toLowerCase() !== absUser.toLowerCase()) {
+                        // Caso: Ambos têm usuários, mas são diferentes.
+                        // Ação: Criar um novo campo (registro) no banco. Mantém o da base e adiciona o do absolute.
+                        finalData.push(baseItem); // Mantém o original da base
+                        finalData.push({
+                            ...absoluteItem,
+                            status: 'Em Uso',
+                            // Copia dados genéricos da base que o absolute não tem, se necessário, 
+                            // ou deixa limpo para indicar que veio do absolute puro
+                            tipo: baseItem.tipo, 
+                            notaCompra: baseItem.notaCompra,
+                            notaPlKm: baseItem.notaPlKm
+                        });
+                    } else {
+                        // Caso: Usuários iguais ou Absolute sem usuário.
+                        // Ação: Merge padrão (Absolute atualiza dados técnicos da Base)
+                        finalData.push({ ...baseItem, ...absoluteItem });
+                    }
+                } else {
+                    // Não tem no Absolute, mantém da Base
+                    finalData.push(baseItem);
+                }
             });
             
-            const finalData = Array.from(consolidatedMap.values()).map(item => {
-                // If there's a current user, force the status to 'Em Uso'
-                if (item.usuarioAtual && item.usuarioAtual.trim() !== '') {
-                    return { ...item, status: 'Em Uso' };
+            // Adiciona itens que só existem no Absolute
+            absoluteData.forEach(absoluteItem => {
+                const serialKey = absoluteItem.serial!.toUpperCase().replace(/\s/g, '');
+                if (!processedSerialsFromAbsolute.has(serialKey)) {
+                    finalData.push(absoluteItem);
                 }
-                return item;
             });
 
             setConsolidatedData(finalData);
